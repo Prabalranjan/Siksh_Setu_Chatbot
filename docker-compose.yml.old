@@ -1,0 +1,98 @@
+version: '3.8'
+
+networks:
+  wren-network:
+    driver: bridge
+
+volumes:
+  qdrant_data:
+  wren_engine_data:
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Qdrant Vector Database
+  # ----------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.10.1
+    container_name: wren-qdrant
+    restart: unless-stopped
+    expose:
+      - "6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - wren-network
+
+  # ----------------------------------------------------------------------------
+  # 2. Wren AI Semantic/Execution Engine
+  # ----------------------------------------------------------------------------
+  wren-engine:
+    image: ghcr.io/canner/wren-engine:latest
+    container_name: wren-engine
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      - WREN_ENGINE_PORT=8080
+    volumes:
+      - wren_engine_data:/app/data
+    networks:
+      - wren-network
+
+  # ----------------------------------------------------------------------------
+  # 3. Wren Ibis Server (Python-based data source query executor)
+  # ----------------------------------------------------------------------------
+  wren-ibis-server:
+    image: ghcr.io/canner/wren-ibis-server:latest
+    container_name: wren-ibis-server
+    restart: unless-stopped
+    expose:
+      - "8000"
+    networks:
+      - wren-network
+
+  # ----------------------------------------------------------------------------
+  # 4. Wren AI Service (Orchestrator for LLM pipelines and vector search)
+  # ----------------------------------------------------------------------------
+  wren-ai-service:
+    image: ghcr.io/canner/wren-ai-service:latest
+    container_name: wren-ai-service
+    restart: unless-stopped
+    expose:
+      - "5572"
+    ports:
+      - "5572:5572" # Exposed to local host for API access
+    environment:
+      # Direct the service to read the custom config we mounted
+      - CONFIG_PATH=/app/data/config.yaml
+      - WREN_ENGINE_ENDPOINT=http://wren-engine:8080
+      - WREN_IBIS_SERVER_ENDPOINT=http://wren-ibis-server:8000
+    volumes:
+      # Mount the local custom config.yaml into the container
+      - ./config.yaml:/app/data/config.yaml:ro
+    extra_hosts:
+      # Ensures host.docker.internal resolves to the host machine's IP (for Ollama and local access)
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
+      - wren-engine
+      - wren-ibis-server
+    networks:
+      - wren-network
+
+  # ----------------------------------------------------------------------------
+  # 5. Wren UI (Frontend application)
+  # ----------------------------------------------------------------------------
+  wren-ui:
+    image: ghcr.io/canner/wren-ui:latest
+    container_name: wren-ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # Access UI at http://localhost:3000
+    environment:
+      - WREN_ENGINE_ENDPOINT=http://wren-engine:8080
+      - WREN_AI_ENDPOINT=http://wren-ai-service:5572
+    depends_on:
+      - wren-ai-service
+    networks:
+      - wren-network

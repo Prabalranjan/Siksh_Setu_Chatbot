@@ -1,0 +1,182 @@
+# ============================================================================
+# Wren AI config.yaml  —  HYBRID sandbox (Gemini LLM + local Ollama embedder)
+# ----------------------------------------------------------------------------
+# Adapted from the official Wren AI config.example.yaml (v0.29.0) — the full
+# pipeline section is kept intact.
+#
+# LLM   -> Google Gemini 3.1 Flash-Lite via LiteLLM's `gemini/` provider,
+#          authenticated with GEMINI_API_KEY (Google AI Studio key). Cloud, fast.
+# Embed -> still served by local Ollama (nomic-embed-text, 768 dims) over its
+#          OpenAI-compatible API (http://host.docker.internal:11434/v1), so
+#          Ollama must still be running with OLLAMA_HOST=0.0.0.0.
+#
+# Previous 100% local (Ollama LLM) config is preserved in backup_ollama_* /.
+# ============================================================================
+
+type: llm
+provider: litellm_llm
+timeout: 600
+models:
+  - alias: default
+    # 'gemini/<name>' routes LiteLLM to Google AI Studio (generativelanguage
+    # endpoint) using GEMINI_API_KEY — NOT Vertex AI (no GCP creds needed).
+    # No api_base: the gemini/ prefix uses Google's default endpoint.
+    model: gemini/gemini-3.1-flash-lite
+    api_key_name: GEMINI_API_KEY   # env var NAME holding the key (see .env)
+    context_window_size: 1000000   # Gemini 3.1 Flash-Lite ~1M token window
+    kwargs:
+      temperature: 0
+      n: 1
+      max_tokens: 2048
+
+---
+type: embedder
+provider: litellm_embedder
+timeout: 600
+models:
+  - alias: default
+    model: openai/nomic-embed-text
+    api_base: http://host.docker.internal:11434/v1
+    api_key_name: OPENAI_API_KEY   # env var NAME holding the key (see .env)
+
+---
+type: engine
+provider: wren_ui
+endpoint: http://wren-ui:3000
+
+---
+type: engine
+provider: wren_ibis
+endpoint: http://ibis-server:8000
+
+---
+type: document_store
+provider: qdrant
+location: http://qdrant:6333
+embedding_model_dim: 768   # nomic-embed-text = 768 dims (was 3072 for OpenAI)
+timeout: 120
+recreate_index: true
+
+---
+type: pipeline
+pipes:
+  - name: db_schema_indexing
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: historical_question_indexing
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: table_description_indexing
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: db_schema_retrieval
+    llm: litellm_llm.default
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: historical_question_retrieval
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: sql_generation
+    llm: litellm_llm.default
+    engine: wren_ui
+    document_store: qdrant
+  - name: sql_correction
+    llm: litellm_llm.default
+    engine: wren_ui
+    document_store: qdrant
+  - name: followup_sql_generation
+    llm: litellm_llm.default
+    engine: wren_ui
+    document_store: qdrant
+  - name: sql_answer
+    llm: litellm_llm.default
+  - name: semantics_description
+    llm: litellm_llm.default
+  - name: relationship_recommendation
+    llm: litellm_llm.default
+  - name: question_recommendation
+    llm: litellm_llm.default
+  - name: question_recommendation_sql_generation
+    llm: litellm_llm.default
+    engine: wren_ui
+    document_store: qdrant
+  - name: intent_classification
+    llm: litellm_llm.default
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: misleading_assistance
+    llm: litellm_llm.default
+  - name: data_assistance
+    llm: litellm_llm.default
+  - name: sql_pairs_indexing
+    document_store: qdrant
+    embedder: litellm_embedder.default
+  - name: sql_pairs_retrieval
+    document_store: qdrant
+    embedder: litellm_embedder.default
+    llm: litellm_llm.default
+  - name: preprocess_sql_data
+    llm: litellm_llm.default
+  - name: sql_executor
+    engine: wren_ui
+  - name: chart_generation
+    llm: litellm_llm.default
+  - name: chart_adjustment
+    llm: litellm_llm.default
+  - name: user_guide_assistance
+    llm: litellm_llm.default
+  - name: sql_question_generation
+    llm: litellm_llm.default
+  - name: sql_generation_reasoning
+    llm: litellm_llm.default
+  - name: followup_sql_generation_reasoning
+    llm: litellm_llm.default
+  - name: sql_regeneration
+    llm: litellm_llm.default
+    engine: wren_ui
+  - name: instructions_indexing
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: instructions_retrieval
+    embedder: litellm_embedder.default
+    document_store: qdrant
+  - name: sql_functions_retrieval
+    engine: wren_ibis
+    document_store: qdrant
+  - name: project_meta_indexing
+    document_store: qdrant
+  - name: sql_tables_extraction
+    llm: litellm_llm.default
+  - name: sql_diagnosis
+    llm: litellm_llm.default
+  - name: sql_knowledge_retrieval
+    engine: wren_ibis
+    document_store: qdrant
+
+---
+settings:
+  doc_endpoint: https://docs.getwren.ai
+  is_oss: true
+  engine_timeout: 30
+  column_indexing_batch_size: 50
+  allow_intent_classification: true
+  # Reasoning off: it adds a large extra chain-of-thought prompt+call that a 3B
+  # struggles with and that bloats token counts. Turn back on with a bigger model.
+  allow_sql_generation_reasoning: false
+  allow_sql_functions_retrieval: true
+  # Column pruning trims the schema sent to the model -> smaller prompts, faster.
+  enable_column_pruning: true
+  # Retrieve fewer tables/columns so prompts stay within the context window.
+  table_retrieval_size: 8
+  table_column_retrieval_size: 50
+  max_sql_correction_retries: 3
+  query_cache_maxsize: 1000
+  query_cache_ttl: 3600
+  langfuse_enable: false      # no Langfuse keys in this sandbox
+  logging_level: INFO
+  development: false
+  historical_question_retrieval_similarity_threshold: 0.9
+  sql_pairs_similarity_threshold: 0.7
+  sql_pairs_retrieval_max_size: 10
+  instructions_similarity_threshold: 0.7
+  instructions_top_k: 10

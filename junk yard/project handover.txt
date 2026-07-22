@@ -1,0 +1,55 @@
+Handoff Context: Local Wren AI Sandbox Setup
+1. Project Goal
+We are setting up a 100% free, local evaluation sandbox for Wren AI (Text-to-SQL semantic layer).
+
+LLM Strategy: Fully local using Ollama on the host machine to serve an existing local GGUF model file and a local embedding model (nomic-embed-text).
+Database: Connects directly over the network to a remote office MySQL database containing massive tables and complex views.
+Wren AI Deployment: Running containerized via local Docker Desktop.
+2. Completed Actions (Files Generated in d:\Wren.ai)
+We have created the core configuration files required for the sandbox:
+
+
+
+attendance_view.sql
+: A denormalized MySQL view schema for student attendance. It demonstrates LLM best practices: flattened joins, descriptive column naming (avoiding abbreviations), casting numeric codes into readable text (e.g., status codes to Absent/Present), and comments to supply metadata to Wren AI.
+
+
+Modelfile
+: A manifest for Ollama to import a local GGUF model. It configures a temperature of 0.0, sets precise SQL-related stop tokens, and sets a system instruction prompting the model to output only raw, unformatted SQL queries.
+
+
+config.yaml
+: Wren AI's custom configuration file mapping the LLM pipeline (litellm_llm) and embedder pipeline (litellm_embedder) to Ollama's local endpoints (http://host.docker.internal:11434/v1).
+
+
+docker-compose.yml
+: The orchestration stack defining wren-ui (port 3000), wren-ai-service (port 5572), wren-engine, wren-ibis-server, and qdrant. It mounts our custom config.yaml and maps extra_hosts to route internal container traffic to the host's Ollama instance.
+3. Current Status
+Infrastructure: The user is currently downloading and installing Docker Desktop on the host system.
+Workspace: All workspace files mentioned above are fully written in the local directory d:\Wren.ai.
+4. Next Steps (Pending Execution Checklist)
+Once Docker Desktop is installed, here are the remaining steps to finish:
+
+Configure Ollama for Docker Access:
+Add a user environment variable OLLAMA_HOST=0.0.0.0 on the host OS.
+Restart the Ollama application so it binds to all interfaces and allows the container network to connect to port 11434.
+Import the Local GGUF Model:
+Edit 
+
+Modelfile
+ by changing the FROM path to the absolute path of your local GGUF file.
+Run in PowerShell:
+powershell
+ollama create wren-sql-model -f d:/Wren.ai/Modelfile
+ollama pull nomic-embed-text
+Launch the Docker Compose Stack:
+Run in PowerShell:
+powershell
+cd d:/Wren.ai
+docker compose up -d
+Establish the Remote Connection:
+Apply the sandbox DDL in 
+
+attendance_view.sql
+ to your office database.
+Access http://localhost:3000 in a browser, connect to the remote office MySQL server, select the attendance view, index the schema, and run Text-to-SQL queries.

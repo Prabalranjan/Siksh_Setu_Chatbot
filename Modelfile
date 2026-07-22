@@ -1,0 +1,43 @@
+# ============================================================================
+# Ollama Modelfile — Local GGUF import for Wren AI (4GB VRAM / speed-optimized)
+# ============================================================================
+#
+# MODEL: Qwen2.5-Coder-3B-Instruct Q8 (3.4GB) — fits fully in 4GB VRAM so it
+# stays GPU-resident and fast on a GTX 1660 Ti. Coder-tuned = strong at SQL
+# and at returning the structured JSON that Wren AI's pipelines require.
+#
+# IMPORTANT: No task-specific SYSTEM prompt and no SQL stop tokens are set here.
+# Wren AI injects its OWN prompts and expects JSON (not raw SQL) from most
+# pipeline steps. A custom "output only SQL" system prompt or a "```" stop token
+# would truncate/break those responses. We keep this a clean, general instruct
+# model and let Wren do all the prompting.
+#
+# Create it with:
+#   ollama create wren-sql-model -f d:/Wren.ai/Modelfile
+# Test it with:
+#   ollama run wren-sql-model
+
+# Local GGUF file (quoted because the path contains a space)
+FROM "E:/AI MODELS/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/qwen2.5-coder-3b-instruct-q8_0.gguf"
+
+# Deterministic output for reproducible SQL
+PARAMETER temperature 0
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05
+
+# Context window. Wren builds large prompts (schema + instructions), so 4096
+# was too small (requests hit ~6800 tokens). 8192 covers them; the KV cache for
+# 8192 on a 3B is only ~300MB, so it still fits 4GB VRAM.
+# NOTE: keep this in sync with context_window_size in config.yaml.
+PARAMETER num_ctx 8192
+
+# ChatML stop token only — do NOT add SQL/markdown stop tokens here.
+PARAMETER stop "<|im_end|>"
+
+# Standard ChatML template used by Qwen2.5 models
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ .Response }}<|im_end|>"""
